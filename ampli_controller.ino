@@ -1,137 +1,128 @@
 #include <avr/wdt.h>
+#define enable_pin 2
+#define relay_pin 7
+#define pausa 1000
 
-#define power_pin 7
-#define relay_pin 8
-#define blinking_time 100
+bool printing=false;
 
-unsigned long prev_time = 0;
-uint8_t rec, in;
-bool flagg = 0;
-int count = 0;
-uint8_t command[3];
+int DC_OK_pin=A1;
+int V24_OK=A2;
+
+char char_in = ' ';
+unsigned long prev_time_info = 0;
 
 
 struct state {
-  bool power_state;
-  bool relay_state;
+  uint8_t id;
+  uint8_t enable_state;
+  uint8_t relay_state;
+  uint8_t DC_OK;
+  
+  uint8_t V24;
+  uint8_t temp;
+  uint8_t tempp;
+  uint8_t endd;
 } stato;
 
 void setup() {
-  Serial.begin(115200);
-  pinMode(LED_BUILTIN, OUTPUT);
-  pinMode(power_pin, OUTPUT);
-  pinMode(relay_pin, OUTPUT);
-  digitalWrite(power_pin, LOW);
-  digitalWrite(relay_pin, LOW);
-
-  blinking();
-  delay(1000);
-}
-
-void loop() {
-  if (millis() - prev_time >= 10) {
-    read_commandss();
-    prev_time = millis();
+  Serial.begin(9600);
+  if (printing){
+    Serial.println(" CONTROLLER "); 
   }
+  stato.id = 0x40;
+  pinMode(enable_pin, OUTPUT);
+  pinMode(relay_pin, OUTPUT);
+  digitalWrite(enable_pin, HIGH);     // 24V OFF
+  digitalWrite(relay_pin, LOW);
+  printState();
+  
+  delay(2000);
 }
 
-void resett () {
-  //wdt_enable(WDTO_30MS);
-  //while (1) ;
-  
+void loop() { 
+  read_commandss();
+  displayInfo();
+
+  delay(10);
 }
 
 void(* Reset)(void) = 0;
 
 void read_commandss() {
   if (Serial.available() > 0) {
-    in = Serial.read();
-    if (flagg) {
-      command[count++] = in;
-      if (in == 0x26) {
-        exec_command();
-        count = 0;
-        flagg = 0;
-        return;
-      }
-    }
-    if (in == 0x25) {
-      flagg = 1;
-    }
-    delay(10);
+    char_in = Serial.read();
+    exec_command();
   }
 }
 
 void exec_command() {
-  switch (command[0]) {
-    case 0xaa:
-      read_statePin();
-      Serial.write((byte *)&stato, sizeof(stato));
+  switch (char_in) {
+    case 0x61:    // sequenza di accensione
+      digitalWrite(relay_pin, HIGH);
+      beacon();
+      printState();
+      delay(pausa);
+      digitalWrite(enable_pin, LOW);
       break;
-    case 0xab:
-      //resett();
+    case 0x62:      // sequenza di spegnimento
+      digitalWrite(enable_pin, HIGH); 
+      beacon();
+      printState();
+      delay(pausa);
+      digitalWrite(relay_pin, LOW);
+      break;  
+    case 0x63:     // relay pin HIGH    
+      digitalWrite(relay_pin, HIGH);
+      break;
+    case 0x64:     // relay pin LOW
+      digitalWrite(relay_pin, LOW);
+      break;
+    case 0x65:     // enable pin HIGH
+      digitalWrite(enable_pin, HIGH);
+      break;
+    case 0x66:     // enable pin LOW
+      digitalWrite(enable_pin, LOW);
+      break;  
+    case 0x67:                            // reset
       Reset();
-      break;
-    case 0xac:
-      digitalWrite(power_pin, HIGH);
-      read_statePin();
-      Serial.write((byte *)&stato, sizeof(stato));
-      break;
-    case 0xad:
-      digitalWrite(power_pin, LOW);
-      read_statePin();
-      Serial.write((byte *)&stato, sizeof(stato));
-      break;
-    case 0xae:
-      digitalWrite(relay_pin, HIGH);
-      read_statePin();
-      Serial.write((byte *)&stato, sizeof(stato));
-      break;
-    case 0xaf:
-      digitalWrite(relay_pin, LOW);
-      read_statePin();
-      Serial.write((byte *)&stato, sizeof(stato));
-      break;
-    case 0xba:
-      digitalWrite(relay_pin, HIGH);
-      delay(3000);
-      digitalWrite(power_pin, HIGH);
-      delay(10);
-      read_statePin();
-      Serial.write((byte *)&stato, sizeof(stato));
-      break;
-    case 0xbb:
-      digitalWrite(power_pin, LOW);
-      delay(3000);
-      digitalWrite(relay_pin, LOW);
-      delay(10);
-      read_statePin();
-      Serial.write((byte *)&stato, sizeof(stato));
       break;
   }
 }
 
 void read_statePin() {
-  stato.power_state = digitalRead(power_pin);
-  stato.relay_state = digitalRead(relay_pin);
-
+  stato.enable_state = digitalRead(enable_pin);
+  stato.relay_state  = digitalRead(relay_pin);
+  stato.DC_OK        = analogRead(DC_OK_pin)/4;
+  stato.V24          = analogRead(V24_OK)/4;
 }
 
-void blinking() {
-  digitalWrite(LED_BUILTIN, HIGH);
-  delay(blinking_time);
-  digitalWrite(LED_BUILTIN, LOW);
-  delay(blinking_time);
-  digitalWrite(LED_BUILTIN, HIGH);
-  delay(blinking_time);
-  digitalWrite(LED_BUILTIN, LOW);
-  delay(blinking_time);
-  digitalWrite(LED_BUILTIN, HIGH);
-  delay(blinking_time);
-  digitalWrite(LED_BUILTIN, LOW);
-  delay(blinking_time);
-  digitalWrite(LED_BUILTIN, HIGH);
-  delay(blinking_time);
-  digitalWrite(LED_BUILTIN, LOW);
-  delay(blinking_time);
+void displayInfo(){
+  if (millis() > prev_time_info + 1000 ){
+    printState();
+    beacon();
+    prev_time_info = millis();
+  }
+}
+
+void beacon(){
+  if (!printing){
+    read_statePin();
+    Serial.write((uint8_t *)&stato,sizeof(state));
+  }
+}
+
+void printState(){
+  if (printing){
+    read_statePin();
+    Serial.print(millis());
+    Serial.print(" - Enable state: ");
+    Serial.print(stato.enable_state);
+    Serial.print(" Relay state: ");
+    Serial.print(stato.relay_state);
+    Serial.print(" DC_OK: ");
+    Serial.print(stato.DC_OK);
+    Serial.print(" 24V: ");
+    Serial.print(stato.V24);
+    Serial.println(" ");
+  }
 }
